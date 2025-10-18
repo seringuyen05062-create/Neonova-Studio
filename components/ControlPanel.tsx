@@ -12,9 +12,6 @@ interface ControlPanelProps {
   setBackgroundColor: (color: string) => void;
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
-  // New props for mode switching
-  mode?: 'vrm' | 'glb';
-  setMode?: (mode: 'vrm' | 'glb') => void;
 }
 
 export default function ControlPanel({
@@ -27,19 +24,57 @@ export default function ControlPanel({
   setBackgroundColor,
   isOpen,
   setIsOpen,
-  mode = 'vrm',
-  setMode
 }: ControlPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const animationInputRef = useRef<HTMLInputElement>(null); // New ref for animation files
   const [modelNameSaved, setModelNameSaved] = useState(false);
+  const [vrmUploaded, setVrmUploaded] = useState(false); // New state for VRM upload success
+  const [isDragging, setIsDragging] = useState(false); // New state for drag & drop
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       onUploadVRM(file);
+      setVrmUploaded(true);
+      // Reset success message after 3 seconds
+      setTimeout(() => {
+        setVrmUploaded(false);
+      }, 3000);
       // Reset the input so the same file can be selected again
       e.target.value = '';
+    }
+  };
+
+  // Drag and drop handlers for VRM upload
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    const vrmFile = files.find(file => 
+      file.name.toLowerCase().endsWith('.vrm') || file.name.toLowerCase().endsWith('.glb')
+    );
+    
+    if (vrmFile) {
+      onUploadVRM(vrmFile);
+      setVrmUploaded(true);
+      setTimeout(() => {
+        setVrmUploaded(false);
+      }, 3000);
     }
   };
 
@@ -71,7 +106,7 @@ export default function ControlPanel({
         <div className="fixed top-4 left-[400px] z-40 w-80 bg-gray-900 rounded-lg border border-gray-700 shadow-xl animate-fade-in">
           {/* Header - Fixed */}
           <div className="p-6 pb-4 border-b border-gray-700">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold text-white">Cài đặt</h3>
               <button
                 onClick={() => setIsOpen(false)}
@@ -82,32 +117,6 @@ export default function ControlPanel({
                 </svg>
               </button>
             </div>
-            
-            {/* Mode Switcher */}
-            {setMode && (
-              <div className="flex bg-gray-800 rounded-lg p-1">
-                <button
-                  onClick={() => setMode('vrm')}
-                  className={`flex-1 px-3 py-2 text-sm rounded-md transition-colors ${
-                    mode === 'vrm'
-                      ? 'bg-blue-600 text-white'
-                      : 'text-white/70 hover:text-white hover:bg-gray-700'
-                  }`}
-                >
-                  🧑‍💼 VRM Avatar
-                </button>
-                <button
-                  onClick={() => setMode('glb')}
-                  className={`flex-1 px-3 py-2 text-sm rounded-md transition-colors ${
-                    mode === 'glb'
-                      ? 'bg-green-600 text-white'
-                      : 'text-white/70 hover:text-white hover:bg-gray-700'
-                  }`}
-                >
-                  🦇 GLB Model
-                </button>
-              </div>
-            )}
           </div>
           
           {/* Scrollable Content */}
@@ -137,8 +146,8 @@ export default function ControlPanel({
               <div className="text-green-400 text-xs mt-2">Đã lưu tên model!</div>
             )}
           </div>
-          <div>
-            <label className="block text-sm font-medium text-white/70 mb-2">
+                    <div>
+            <label className="block text-sm font-medium text-white/70 mb-3">
               Tải lên mô hình VRM
             </label>
             <input
@@ -150,29 +159,57 @@ export default function ControlPanel({
             />
             <button
               onClick={() => fileInputRef.current?.click()}
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
               disabled={isLoading}
-              className="btn btn-secondary w-full"
+              className={`w-full py-3 px-4 rounded-lg transition-all duration-200 flex items-center justify-center space-x-2 border font-medium ${
+                isDragging 
+                  ? 'bg-gradient-to-r from-purple-500 to-purple-600 border-purple-400 scale-105 shadow-lg' 
+                  : isLoading
+                    ? 'bg-gradient-to-r from-gray-600 to-gray-700 border-gray-500/20 text-white'
+                    : 'bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 border-purple-500/20 text-white hover:scale-105 hover:shadow-lg'
+              }`}
             >
               {isLoading ? (
-                <span className="flex items-center justify-center">
-                  <svg className="animate-spin h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24">
+                <span className="flex items-center space-x-2">
+                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  Đang tải...
+                  <span>Đang tải mô hình...</span>
+                </span>
+              ) : isDragging ? (
+                <span className="flex items-center space-x-2">
+                  <svg className="w-5 h-5 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 12l2 2 4-4" />
+                  </svg>
+                  <span>🎯 Thả file VRM vào đây!</span>
                 </span>
               ) : (
-                <span className="flex items-center justify-center">
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <span className="flex items-center space-x-2">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
-                  Chọn file VRM
+                  <span>📤 Chọn hoặc kéo thả file VRM</span>
                 </span>
               )}
             </button>
-            <p className="text-xs text-white/50 mt-2">
-              Hỗ trợ file .vrm và .glb
-            </p>
+            <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+              <p className="text-xs text-blue-300 leading-relaxed">
+                💡 <strong>Hướng dẫn:</strong> Chọn file VRM để nhân vật hiện ngay trong không gian 3D. 
+                Hỗ trợ định dạng .vrm và .glb
+              </p>
+            </div>
+            {vrmUploaded && (
+              <div className="mt-3 p-3 bg-green-500/10 border border-green-500/20 rounded-lg animate-fade-in">
+                <p className="text-xs text-green-300 leading-relaxed flex items-center">
+                  <span className="mr-2">✅</span>
+                  <span><strong>Thành công!</strong> Nhân vật VRM đã được tải lên và hiển thị trong không gian 3D</span>
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Animation Upload Section */}
