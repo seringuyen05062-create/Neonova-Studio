@@ -276,43 +276,86 @@ export class LipSyncController {
   }
 
   /**
-   * Calculate viseme weight based on phoneme type
+   * Calculate appropriate weight for each viseme
    */
   private calculateVisemeWeight(viseme: string): number {
-    // Vowels get full weight
-    if (['aa', 'E', 'ih', 'oh', 'ou'].includes(viseme)) {
-      return 1.0;
+    // Reduce overall weights to prevent mouth opening too wide
+    
+    // Vowels - reduced from 1.0 to more natural values
+    if (viseme === 'aa') {
+      return 0.6; // Wide open (reduced from 1.0)
     }
-    // Consonants get reduced weight
-    return 0.6;
+    if (['E', 'ih'].includes(viseme)) {
+      return 0.4; // Medium open (reduced from 1.0)
+    }
+    if (['oh', 'ou'].includes(viseme)) {
+      return 0.5; // Round mouth (reduced from 1.0)
+    }
+    
+    // Consonants - slightly reduced
+    if (['PP', 'FF', 'DD'].includes(viseme)) {
+      return 0.5; // Closed/contact sounds
+    }
+    
+    // Default for other consonants
+    return 0.3;
   }
 
   /**
    * Reset mouth to neutral position
    */
   private resetMouth() {
-    // Không reset miệng về neutral, giữ nguyên morph target hiện tại
-    // Để đảm bảo pose mẫu và animation body không bị ảnh hưởng
+    if (!this.vrm.expressionManager) return;
+
+    const expressionManager = this.vrm.expressionManager;
+    
+    // Reset all mouth-related expressions to 0
+    const mouthExpressions = ['aa', 'E', 'ih', 'oh', 'ou', 'PP', 'FF', 'DD', 'nn', 'RR', 'SS', 'CH', 'kk'];
+    
+    mouthExpressions.forEach(expression => {
+      try {
+        // First try direct expression name
+        if (expressionManager.expressionMap[expression]) {
+          expressionManager.setValue(expression as any, 0);
+        }
+        // Also try VRM standard names
+        const vrmExpression = VISEME_TO_BLENDSHAPE[expression];
+        if (vrmExpression && expressionManager.expressionMap[vrmExpression]) {
+          expressionManager.setValue(vrmExpression as any, 0);
+        }
+      } catch (error) {
+        // Ignore if expression doesn't exist
+      }
+    });
+
+    console.log('👄 [LipSync] Mouth reset to neutral');
   }
 
   /**
    * Stop lip sync animation
    */
   stopLipSync() {
+    console.log('👄 [LipSync] ========== STOPPING LIP SYNC ==========');
+    
     this.isPlaying = false;
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
     
-    // Resume auto facial expressions after lip sync
-    if (this.onLipSyncEnd) {
-      console.log('👄 [LipSync] Resuming auto facial expressions');
-      this.onLipSyncEnd();
-    }
-    
-    // Reset mouth to neutral after lip sync
+    // Reset mouth to neutral FIRST (before resuming auto expressions)
     this.resetMouth();
+    
+    // Small delay to ensure mouth reset is applied
+    setTimeout(() => {
+      // Resume auto facial expressions after lip sync
+      if (this.onLipSyncEnd) {
+        console.log('👄 [LipSync] Resuming auto facial expressions');
+        this.onLipSyncEnd();
+      }
+    }, 100); // 100ms delay to ensure reset is applied
+    
+    console.log('👄 [LipSync] Lip sync stopped and mouth reset to neutral');
   }
 
   /**
