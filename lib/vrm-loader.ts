@@ -35,13 +35,62 @@ export class VRMLoader {
         URL.revokeObjectURL(url);
       }
 
-      // Disable frustum culling for VRM
+      // Disable frustum culling for VRM and ensure visibility
       vrm.scene.traverse((obj) => {
         obj.frustumCulled = false;
+        obj.visible = true;
+        
+        // Ensure all materials are visible and properly configured
+        if ('material' in obj) {
+          const material = (obj as any).material;
+          if (material) {
+            const materials = Array.isArray(material) ? material : [material];
+            materials.forEach(mat => {
+              if (mat) {
+                // CRITICAL: Don't force all materials to be transparent
+                // Only set transparent if alphaMode is set
+                const needsTransparency = mat.alphaTest > 0 || mat.opacity < 1 || mat.transparent;
+                
+                mat.side = THREE.FrontSide;
+                if (needsTransparency) {
+                  mat.transparent = true;
+                  mat.alphaTest = Math.max(mat.alphaTest || 0, 0.01);
+                  mat.depthWrite = false;
+                } else {
+                  mat.transparent = false;
+                  mat.depthWrite = true;
+                }
+                
+                // Ensure color/texture is preserved
+                mat.needsUpdate = true;
+                
+                console.log('[VRMLoader] Material config:', {
+                  name: mat.name,
+                  transparent: mat.transparent,
+                  alphaTest: mat.alphaTest,
+                  hasMap: !!mat.map,
+                  color: mat.color?.getHexString()
+                });
+              }
+            });
+          }
+        }
       });
+
+      // Ensure the VRM scene is visible
+      vrm.scene.visible = true;
 
       // Rotate model to face camera
       VRMUtils.rotateVRM0(vrm);
+
+      // Debug: Log VRM structure
+      console.log('VRM loaded successfully:', {
+        scene: vrm.scene,
+        position: vrm.scene.position,
+        scale: vrm.scene.scale,
+        visible: vrm.scene.visible,
+        childrenCount: vrm.scene.children.length
+      });
 
       return vrm;
     } catch (error) {

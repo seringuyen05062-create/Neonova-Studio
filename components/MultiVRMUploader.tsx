@@ -1,10 +1,19 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
-import { useMultiVRM } from '@/hooks/useMultiVRM';
+import { VRM } from '@pixiv/three-vrm';
 import { log } from '@/lib/utils/logger';
 
 interface MultiVRMUploaderProps {
+  vrms: (VRM | null)[];
+  byIndex: {
+    get: (idx: number) => VRM | null;
+    isLoading: (idx: number) => boolean;
+    error: (idx: number) => string | null;
+  };
+  loadVRM: (index: number, file: File) => Promise<void>;
+  unloadVRM: (index: number) => void;
+  loadedCount: number;
   onUploadComplete?: (index: number, fileName: string) => void;
   onUploadError?: (index: number, error: string) => void;
 }
@@ -15,8 +24,15 @@ const MODEL_TYPES = [
   { index: 2, label: 'Assistant 2', icon: '👥', description: 'Right side character' },
 ];
 
-export function MultiVRMUploader({ onUploadComplete, onUploadError }: MultiVRMUploaderProps) {
-  const { vrms, loadingStates, errors, loadVRM, unloadVRM, loadedCount } = useMultiVRM();
+export function MultiVRMUploader({ 
+  vrms, 
+  byIndex, 
+  loadVRM, 
+  unloadVRM, 
+  loadedCount, 
+  onUploadComplete, 
+  onUploadError 
+}: MultiVRMUploaderProps) {
   const [dragStates, setDragStates] = useState<boolean[]>(Array(3).fill(false));
 
   const handleFileSelect = useCallback(async (index: number, file: File) => {
@@ -101,8 +117,8 @@ export function MultiVRMUploader({ onUploadComplete, onUploadError }: MultiVRMUp
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {MODEL_TYPES.map(({ index, label, icon, description }) => {
           const vrm = vrms[index];
-          const isLoading = loadingStates[index];
-          const error = errors[index];
+          const isLoading = byIndex.isLoading(index);
+          const error = byIndex.error(index);
           const isDragging = dragStates[index];
 
           return (

@@ -3,6 +3,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useVRM } from '@/hooks/useVRM';
+import { useMultiVRM } from '@/hooks/useMultiVRM';
+import { useMultiAnimation } from '@/hooks/useMultiAnimation';
 import { useVRMA } from '@/hooks/useVRMA';
 import { useChat } from '@/hooks/useChat';
 import { useAnimation } from '@/hooks/useAnimation';
@@ -17,6 +19,7 @@ import axios from 'axios';
 
 // Dynamically import Scene to avoid SSR issues with Three.js
 const Scene = dynamic(() => import('@/components/Scene'), { ssr: false });
+const MultiVRMScene = dynamic(() => import('@/components/MultiVRMScene').then(mod => ({ default: mod.MultiVRMScene })), { ssr: false });
 
 // VRMA animation files mapping
 const VRMA_FILES = [
@@ -42,7 +45,26 @@ export default function Home() {
   const lipSyncControllerRef = useRef<LipSyncController | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   
-  const { vrm, isLoading: vrmLoading, loadVRM } = useVRM();
+  
+  // const { vrm, isLoading: vrmLoading, loadVRM } = useVRM(); // Comment out single VRM
+  
+  // Multi-VRM system
+  const multiVRM = useMultiVRM();
+  const { vrms, byIndex, loadedCount, isAnyLoading: multiLoading } = multiVRM;
+  
+  // For compatibility, use main VRM as single VRM
+  const vrm = byIndex.get(0);
+  const vrmLoading = byIndex.isLoading(0);
+  const loadVRM = (file: File) => multiVRM.loadVRM(0, file);
+  const multiAnimation = useMultiAnimation(vrms);
+
+  // State to track which mode we're in
+  const [isMultiMode, setIsMultiMode] = useState(false);
+  
+  // Debug mode changes
+  useEffect(() => {
+    console.log('isMultiMode changed to:', isMultiMode);
+  }, [isMultiMode]);
   const vrmaHook = useVRMA();
   const { animations: vrmaAnimations, loadVRMA, reloadAllWithVRM } = vrmaHook;
   const { playAnimation, stopAnimation, update: updateAnimation, pauseAutoFacialExpressions, resumeAutoFacialExpressions } = useAnimation(vrm, vrmaAnimations);
@@ -170,9 +192,11 @@ export default function Home() {
 
   // When VRM is loaded, load and retarget all VRMA animations
   useEffect(() => {
-    if (vrm) {
+    // Chỉ sử dụng model chính (index 0) cho lip sync
+    const mainVRM = byIndex.get(0);
+    if (mainVRM) {
       // Initialize lip sync controller with pause/resume callbacks
-      lipSyncControllerRef.current = new LipSyncController(vrm, {
+      lipSyncControllerRef.current = new LipSyncController(mainVRM, {
         onLipSyncStart: () => {
           console.log('[Page] Pausing auto facial expressions for lip sync');
           pauseAutoFacialExpressions();
@@ -187,7 +211,7 @@ export default function Home() {
       const loadAndRetargetAnimations = async () => {
         console.log('🔄 Loading VRMA animations with official API...');
         console.log('📋 VRMA_FILES to load:', VRMA_FILES);
-        await reloadAllWithVRM(vrm, VRMA_FILES);
+        await reloadAllWithVRM(mainVRM, VRMA_FILES);
 
         // Đảm bảo lấy lại animations mới nhất sau khi reload
         console.log('✅ Available animations after reload:', Array.from(vrmaHook.animations.keys()));
@@ -219,11 +243,12 @@ export default function Home() {
       allIdleTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
       allIdleTimeoutsRef.current = [];
     };
-  }, [vrm, reloadAllWithVRM, playAnimation]);
+  }, [byIndex, reloadAllWithVRM, playAnimation, pauseAutoFacialExpressions, resumeAutoFacialExpressions]);
 
   // Start idle sequence when VRM and animations are loaded
   useEffect(() => {
-    if (vrm && vrmaAnimations.size > 0) {
+    const mainVRM = byIndex.get(0);
+    if (mainVRM && vrmaAnimations.size > 0) {
       // Start idle sequence after initial setup
       const timer = setTimeout(() => {
         startIdleSequence();
@@ -233,7 +258,7 @@ export default function Home() {
         clearTimeout(timer);
       };
     }
-  }, [vrm, vrmaAnimations.size, startIdleSequence]);
+  }, [byIndex, vrmaAnimations.size, startIdleSequence]);
 
   // Handle VRM upload
   const handleUploadVRM = async (file: File) => {
@@ -706,14 +731,38 @@ export default function Home() {
           {/* Status indicator */}
           <div className="absolute top-4 left-4 z-10">
             <div className="flex items-center space-x-2 text-xs text-white/70">
-              <div className={`w-2 h-2 rounded-full ${vrm ? 'bg-green-400' : 'bg-gray-400'} animate-pulse`}></div>
-              <span>{vrm ? 'LIVE' : 'OFFLINE'}</span>
+              <div className={`w-2 h-2 rounded-full ${
+                isMultiMode ? (loadedCount > 0 ? 'bg-green-400' : 'bg-gray-400') : (vrm ? 'bg-green-400' : 'bg-gray-400')
+              } animate-pulse`}></div>
+              <span>{
+                isMultiMode 
+                  ? (loadedCount > 0 ? `LIVE (${loadedCount}/3)` : 'OFFLINE')
+                  : (vrm ? 'LIVE' : 'OFFLINE')
+              }</span>
             </div>
           </div>
-          <Scene ref={sceneRef} vrm={vrm} onUpdate={updateAnimation} aspectRatio={aspectRatio} backgroundColor={backgroundColor} />
+          
+          {/* Conditional Scene Rendering */}
+          {(() => {
+            console.log('[DEBUG] vrms in page:', {
+              count: vrms.filter(Boolean).length,
+              slots: [!!byIndex.get(0), !!byIndex.get(1), !!byIndex.get(2)],
+              isMultiMode,
+              loadedCount
+            });
+            return isMultiMode ? (
+              <MultiVRMScene 
+                vrms={vrms} 
+                showStudioBackground={true}
+                enableGroundSnapper={true}
+              />
+            ) : (
+              <Scene ref={sceneRef} vrm={vrm} onUpdate={updateAnimation} aspectRatio={aspectRatio} backgroundColor={backgroundColor} />
+            );
+          })()}
         
           {/* Loading Overlay */}
-          {vrmLoading && (
+          {(isMultiMode ? multiLoading : vrmLoading) && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm rounded-2xl">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary mx-auto mb-4"></div>
@@ -723,7 +772,7 @@ export default function Home() {
           )}
 
           {/* No VRM Message */}
-          {!vrm && !vrmLoading && (
+          {(isMultiMode ? (loadedCount === 0 && !multiLoading) : (!vrm && !vrmLoading)) && (
             <div className="absolute inset-0 flex items-center justify-center rounded-2xl">
               <div className="text-center text-white/70">
                 <svg className="w-24 h-24 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -742,13 +791,24 @@ export default function Home() {
       {/* Control Panel */}
       <ControlPanel
         onUploadVRM={handleUploadVRM}
-        isLoading={vrmLoading}
+        isLoading={isMultiMode ? multiLoading : vrmLoading}
         modelName={modelName}
         setModelName={setModelName}
         backgroundColor={backgroundColor}
         setBackgroundColor={setBackgroundColor}
         isOpen={showControlPanel}
         setIsOpen={setShowControlPanel}
+        onModeChange={(mode) => {
+          console.log('App: Mode changing to:', mode, 'was:', isMultiMode);
+          setIsMultiMode(mode === 'multi');
+        }}
+        multiVRM={{
+          vrms,
+          byIndex,
+          loadVRM: multiVRM.loadVRM,
+          unloadVRM: multiVRM.unloadVRM,
+          loadedCount
+        }}
       />
 
   {/* Hidden audio element for lip sync & dance */}

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import { VRM } from '@pixiv/three-vrm';
+import { MultiVRMUploader } from './MultiVRMUploader';
 
 interface ControlPanelProps {
   onUploadVRM: (file: File) => void;
@@ -12,6 +14,19 @@ interface ControlPanelProps {
   setBackgroundColor: (color: string) => void;
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
+  onModeChange?: (mode: 'single' | 'multi') => void; // New prop for mode change
+  // Multi-VRM props
+  multiVRM?: {
+    vrms: (VRM | null)[];
+    byIndex: {
+      get: (idx: number) => VRM | null;
+      isLoading: (idx: number) => boolean;
+      error: (idx: number) => string | null;
+    };
+    loadVRM: (index: number, file: File) => Promise<void>;
+    unloadVRM: (index: number) => void;
+    loadedCount: number;
+  };
 }
 
 export default function ControlPanel({
@@ -24,12 +39,15 @@ export default function ControlPanel({
   setBackgroundColor,
   isOpen,
   setIsOpen,
+  onModeChange,
+  multiVRM,
 }: ControlPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const animationInputRef = useRef<HTMLInputElement>(null); // New ref for animation files
   const [modelNameSaved, setModelNameSaved] = useState(false);
   const [vrmUploaded, setVrmUploaded] = useState(false); // New state for VRM upload success
   const [isDragging, setIsDragging] = useState(false); // New state for drag & drop
+  const [uploadMode, setUploadMode] = useState<'single' | 'multi'>('single'); // New state for upload mode
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -146,7 +164,10 @@ export default function ControlPanel({
               <div className="text-green-400 text-xs mt-2">Đã lưu tên model!</div>
             )}
           </div>
-                    <div>
+          
+          {/* Single VRM Upload - only show in single mode */}
+          {uploadMode === 'single' && (
+          <div>
             <label className="block text-sm font-medium text-white/70 mb-3">
               Tải lên mô hình VRM
             </label>
@@ -211,29 +232,75 @@ export default function ControlPanel({
               </div>
             )}
           </div>
+          )}
 
-          {/* Multi-VRM Feature Link */}
+          {/* Upload Mode Toggle */}
           <div className="border-t border-gray-700 pt-4">
-            <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-lg p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h4 className="text-sm font-medium text-white mb-1">🎭 Multi-VRM System</h4>
-                  <p className="text-xs text-white/70">Tải nhiều nhân vật cùng lúc (tối đa 3)</p>
-                </div>
-                <div className="text-2xl">👥</div>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-white/70 mb-3">
+                Chế độ tải VRM
+              </label>
+              <div className="flex rounded-lg bg-gray-800 p-1">
+                <button
+                  onClick={() => {
+                    setUploadMode('single');
+                    onModeChange?.('single');
+                    console.log('Mode changed to single');
+                  }}
+                  className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
+                    uploadMode === 'single'
+                      ? 'bg-blue-600 text-white shadow-lg'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center justify-center space-x-2">
+                    <span>�</span>
+                    <span>Đơn lẻ</span>
+                  </div>
+                </button>
+                <button
+                  onClick={() => {
+                    setUploadMode('multi');
+                    onModeChange?.('multi');
+                    console.log('Mode changed to multi');
+                  }}
+                  className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
+                    uploadMode === 'multi'
+                      ? 'bg-purple-600 text-white shadow-lg'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center justify-center space-x-2">
+                    <span>�</span>
+                    <span>Nhiều (3)</span>
+                  </div>
+                </button>
               </div>
-              <a 
-                href="/multi-vrm" 
-                target="_blank"
-                className="w-full inline-flex items-center justify-center px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg transition-all duration-200 text-sm font-medium"
-              >
-                <span className="mr-2">🚀</span>
-                Mở Multi-VRM Demo
-              </a>
-              <p className="text-xs text-white/50 mt-2 text-center">
-                Trang mới với hỗ trợ tối đa 3 nhân vật VRM
+              <p className="text-xs text-white/50 mt-2">
+                {uploadMode === 'single' 
+                  ? 'Tải 1 model VRM duy nhất' 
+                  : 'Tải tối đa 3 model VRM cùng lúc'}
               </p>
             </div>
+
+            {/* Multi VRM Upload when in multi mode */}
+            {uploadMode === 'multi' && multiVRM && (
+              <div>
+                <MultiVRMUploader
+                  vrms={multiVRM.vrms}
+                  byIndex={multiVRM.byIndex}
+                  loadVRM={multiVRM.loadVRM}
+                  unloadVRM={multiVRM.unloadVRM}
+                  loadedCount={multiVRM.loadedCount}
+                  onUploadComplete={(index, fileName) => {
+                    console.log(`Model ${index} uploaded: ${fileName}`);
+                  }}
+                  onUploadError={(index, error) => {
+                    console.error(`Model ${index} upload error:`, error);
+                  }}
+                />
+              </div>
+            )}
           </div>
 
           {/* Animation Upload Section */}

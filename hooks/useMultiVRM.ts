@@ -1,203 +1,205 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { VRM } from '@pixiv/three-vrm';
 import { VRMLoader } from '@/lib/vrm-loader';
-import { log } from '@/lib/utils/logger';
-
-const MAX_VRM_COUNT = 3;
-
-export interface MultiVRMState {
-  vrms: (VRM | null)[];
-  loadingStates: boolean[];
-  errors: (string | null)[];
-}
-
-export function useMultiVRM() {
-  const [vrms, setVrms] = useState<(VRM | null)[]>(Array(MAX_VRM_COUNT).fill(null));
-  const [loadingStates, setLoadingStates] = useState<boolean[]>(Array(MAX_VRM_COUNT).fill(false));
-  const [errors, setErrors] = useState<(string | null)[]>(Array(MAX_VRM_COUNT).fill(null));
-
-  /**
-   * Load VRM at specific index (0 = main, 1-2 = assistants)
-   */
-  const loadVRM = useCallback(async (index: number, source: File | string) => {
-    if (index < 0 || index >= MAX_VRM_COUNT) {
-      log.error('useMultiVRM', `Invalid VRM index: ${index}. Must be 0-${MAX_VRM_COUNT - 1}`);
-      return;
-    }
-
-    log.info('useMultiVRM', `Loading VRM at index ${index}`, undefined, { 
-      isMainModel: index === 0,
-      source: typeof source === 'string' ? source : source.name
-    });
-
-    // Update loading state for this index
-    setLoadingStates(prev => {
-      const newStates = [...prev];
-      newStates[index] = true;
-      return newStates;
-    });
-
-    // Clear previous error
-    setErrors(prev => {
-      const newErrors = [...prev];
-      newErrors[index] = null;
-      return newErrors;
-    });
-
-    try {
-      const loader = new VRMLoader();
-      const loadedVRM = await loader.loadVRM(source);
-      
-      // Dispose previous VRM at this index if exists
-      if (vrms[index]) {
-        disposeVRM(vrms[index]!);
-      }
-
-      // Update VRM array
-      setVrms(prev => {
-        const newVrms = [...prev];
-        newVrms[index] = loadedVRM;
-        return newVrms;
-      });
-
-      log.info('useMultiVRM', `Successfully loaded VRM at index ${index}`, undefined, {
-        modelLoaded: true,
-        isMainModel: index === 0
-      });
-
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load VRM';
-      
-      setErrors(prev => {
-        const newErrors = [...prev];
-        newErrors[index] = errorMessage;
-        return newErrors;
-      });
-
-      log.error('useMultiVRM', `Failed to load VRM at index ${index}`, err as Error);
-    } finally {
-      setLoadingStates(prev => {
-        const newStates = [...prev];
-        newStates[index] = false;
-        return newStates;
-      });
-    }
-  }, [vrms]);
-
-  /**
-   * Unload VRM at specific index
-   */
-  const unloadVRM = useCallback((index: number) => {
-    if (index < 0 || index >= MAX_VRM_COUNT) {
-      log.error('useMultiVRM', `Invalid VRM index: ${index}. Must be 0-${MAX_VRM_COUNT - 1}`);
-      return;
-    }
-
-    const vrmToUnload = vrms[index];
-    if (vrmToUnload) {
-      disposeVRM(vrmToUnload);
-      
-      setVrms(prev => {
-        const newVrms = [...prev];
-        newVrms[index] = null;
-        return newVrms;
-      });
-
-      setErrors(prev => {
-        const newErrors = [...prev];
-        newErrors[index] = null;
-        return newErrors;
-      });
-
-      log.info('useMultiVRM', `Unloaded VRM at index ${index}`);
-    }
-  }, [vrms]);
-
-  /**
-   * Unload all VRM models
-   */
-  const unloadAllVRMs = useCallback(() => {
-    vrms.forEach((vrm, index) => {
-      if (vrm) {
-        disposeVRM(vrm);
-      }
-    });
-
-    setVrms(Array(MAX_VRM_COUNT).fill(null));
-    setErrors(Array(MAX_VRM_COUNT).fill(null));
-    setLoadingStates(Array(MAX_VRM_COUNT).fill(false));
-
-    log.info('useMultiVRM', 'Unloaded all VRM models');
-  }, [vrms]);
-
-  /**
-   * Get the main VRM model (index 0)
-   */
-  const getMainVRM = useCallback(() => {
-    return vrms[0];
-  }, [vrms]);
-
-  /**
-   * Get all loaded VRM models (excluding null entries)
-   */
-  const getLoadedVRMs = useCallback(() => {
-    return vrms.filter((vrm): vrm is VRM => vrm !== null);
-  }, [vrms]);
-
-  /**
-   * Check if any VRM is currently loading
-   */
-  const isAnyLoading = loadingStates.some(loading => loading);
-
-  /**
-   * Get count of loaded models
-   */
-  const loadedCount = vrms.filter(vrm => vrm !== null).length;
-
-  return {
-    // State
-    vrms,
-    loadingStates,
-    errors,
-    isAnyLoading,
-    loadedCount,
-    
-    // Actions
-    loadVRM,
-    unloadVRM,
-    unloadAllVRMs,
-    
-    // Getters
-    getMainVRM,
-    getLoadedVRMs,
-    
-    // Constants
-    MAX_VRM_COUNT,
-  };
-}
 
 /**
- * Dispose VRM resources properly
+ * Tối đa 3 model:
+ *  - index 0: model chính (có LipSyncController)
+ *  - index 1,2: model phụ (không LipSync)
  */
-function disposeVRM(vrm: VRM) {
-  try {
-    vrm.scene.traverse((object) => {
-      if ('geometry' in object) {
-        (object as any).geometry?.dispose();
-      }
-      if ('material' in object) {
-        const material = (object as any).material;
-        if (Array.isArray(material)) {
-          material.forEach((m) => m?.dispose());
-        } else {
-          material?.dispose();
+const MAX_MODELS = 3;
+
+type VRMSource = File | string;
+
+type SlotState = {
+  vrm: VRM | null;
+  isLoading: boolean;
+  error: string | null;
+  // token để chống race-condition (mỗi lần load tăng 1)
+  token: number;
+};
+
+export function useMultiVRM() {
+  // Khởi tạo 3 slot rỗng
+  const [slots, setSlots] = useState<SlotState[]>(
+    Array.from({ length: MAX_MODELS }, () => ({
+      vrm: null,
+      isLoading: false,
+      error: null,
+      token: 0,
+    }))
+  );
+
+  // VRMLoader nên tạo mới cho mỗi lần load để an toàn
+  const loaderRef = useRef<VRMLoader | null>(null);
+  const getLoader = () => {
+    if (!loaderRef.current) loaderRef.current = new VRMLoader();
+    return loaderRef.current;
+  };
+
+  /**
+   * Hủy & giải phóng tài nguyên của một VRM
+   */
+  const disposeVRM = useCallback((vrm: VRM | null) => {
+    if (!vrm) return;
+    try {
+      // three-vrm không có .dispose() tổng quát; ta dispose geometry/material
+      vrm.scene.traverse((obj: any) => {
+        if (obj.isMesh) {
+          // geometry
+          obj.geometry?.dispose?.();
+          // material (có thể là array)
+          const mat = obj.material;
+          if (Array.isArray(mat)) {
+            mat.forEach((m) => {
+              // texture map…
+              m?.map?.dispose?.();
+              m?.normalMap?.dispose?.();
+              m?.metalnessMap?.dispose?.();
+              m?.roughnessMap?.dispose?.();
+              m?.emissiveMap?.dispose?.();
+              m?.dispose?.();
+            });
+          } else if (mat) {
+            mat.map?.dispose?.();
+            mat.normalMap?.dispose?.();
+            mat.metalnessMap?.dispose?.();
+            mat.roughnessMap?.dispose?.();
+            mat.emissiveMap?.dispose?.();
+            mat.dispose?.();
+          }
         }
-      }
+      });
+      // Optionally: detach scene khỏi graph nếu bạn có scene parent
+      // (nhưng trong R3F, React sẽ quản lý unmount)
+    } catch (e) {
+      console.warn('[useMultiVRM] disposeVRM warning:', e);
+    }
+  }, []);
+
+  /**
+   * Load 1 VRM vào slot idx (0..2)
+   */
+  const loadVRM = useCallback(async (idx: number, source: VRMSource) => {
+    if (idx < 0 || idx >= MAX_MODELS) {
+      throw new Error(`idx phải trong khoảng 0..${MAX_MODELS - 1}`);
+    }
+
+    // tạo token mới cho slot này để chống race
+    const currentToken = slots[idx]?.token + 1; // tính toán token trước
+    setSlots((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], isLoading: true, error: null, token: currentToken };
+      return next;
     });
-    log.info('useMultiVRM', 'VRM resources disposed successfully');
-  } catch (error) {
-    log.error('useMultiVRM', 'Error disposing VRM resources', error as Error);
-  }
+
+    const loader = getLoader();
+
+    try {
+      const loadedVRM = await loader.loadVRM(source);
+
+      // Kiểm tra token: nếu trong lúc chờ, người dùng đã bấm load lần khác, bỏ qua kết quả cũ
+      setSlots((prev) => {
+        const latest = prev[idx];
+        if (latest.token !== currentToken) {
+          // token mismatch -> bỏ
+          // vẫn dispose VRM vừa load (tránh leak)
+          disposeVRM(loadedVRM);
+          return prev;
+        }
+
+        // dispose VRM cũ nếu có
+        if (latest.vrm && latest.vrm !== loadedVRM) {
+          disposeVRM(latest.vrm);
+        }
+
+        const next = [...prev];
+        next[idx] = {
+          ...latest,
+          vrm: loadedVRM,
+          isLoading: false,
+          error: null,
+        };
+        return next;
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to load VRM';
+      setSlots((prev) => {
+        const latest = prev[idx];
+        // chỉ cập nhật nếu token khớp
+        if (latest.token !== currentToken) return prev;
+        const next = [...prev];
+        next[idx] = { ...latest, isLoading: false, error: msg };
+        return next;
+      });
+    }
+  }, [disposeVRM, slots]);
+
+  /**
+   * Bỏ VRM ở slot idx
+   */
+  const unloadVRM = useCallback((idx: number) => {
+    if (idx < 0 || idx >= MAX_MODELS) return;
+    setSlots((prev) => {
+      const next = [...prev];
+      const old = next[idx];
+      if (old.vrm) disposeVRM(old.vrm);
+      next[idx] = { vrm: null, isLoading: false, error: null, token: old.token + 1 };
+      return next;
+    });
+  }, [disposeVRM]);
+
+  /**
+   * Bỏ tất cả VRM
+   */
+  const unloadAll = useCallback(() => {
+    setSlots((prev) => {
+      prev.forEach((s) => disposeVRM(s.vrm));
+      return Array.from({ length: MAX_MODELS }, () => ({
+        vrm: null,
+        isLoading: false,
+        error: null,
+        token: 0,
+      }));
+    });
+  }, [disposeVRM]);
+
+  // mảng vrms + loading + error để dễ dùng
+  const vrms = useMemo(() => slots.map((s) => s.vrm), [slots]);
+  const byIndex = useMemo(
+    () => ({
+      get: (idx: number) => (idx >= 0 && idx < MAX_MODELS ? slots[idx].vrm : null),
+      isLoading: (idx: number) => (idx >= 0 && idx < MAX_MODELS ? slots[idx].isLoading : false),
+      error: (idx: number) => (idx >= 0 && idx < MAX_MODELS ? slots[idx].error : null),
+    }),
+    [slots]
+  );
+
+  // Tương thích với hook cũ
+  const loadedCount = vrms.filter(vrm => vrm !== null).length;
+  const isAnyLoading = slots.some(slot => slot.isLoading);
+  const loadingStates = slots.map(slot => slot.isLoading);
+  const errors = slots.map(slot => slot.error);
+
+  return {
+    // API mới (khuyên dùng)
+    vrms,
+    byIndex,
+    loadVRM,
+    unloadVRM,
+    unloadAll,
+    MAX_MODELS,
+
+    // API cũ để tương thích
+    loadedCount,
+    isAnyLoading,
+    loadingStates,
+    errors,
+    getMainVRM: () => byIndex.get(0),
+    getLoadedVRMs: () => vrms.filter(vrm => vrm !== null) as VRM[],
+    unloadAllVRMs: unloadAll,
+    MAX_VRM_COUNT: MAX_MODELS,
+  };
 }
