@@ -87,11 +87,17 @@ export function useMultiVRM() {
       throw new Error(`idx phải trong khoảng 0..${MAX_MODELS - 1}`);
     }
 
-    // tạo token mới cho slot này để chống race
-    const currentToken = slots[idx]?.token + 1; // tính toán token trước
+    // FIX: Use functional update to get correct token from latest state
+    let currentToken: number;
     setSlots((prev) => {
       const next = [...prev];
-      next[idx] = { ...next[idx], isLoading: true, error: null, token: currentToken };
+      currentToken = prev[idx].token + 1; // Get token from CURRENT state
+      next[idx] = { 
+        ...next[idx], 
+        isLoading: true, 
+        error: null, 
+        token: currentToken 
+      };
       return next;
     });
 
@@ -103,9 +109,13 @@ export function useMultiVRM() {
       // Kiểm tra token: nếu trong lúc chờ, người dùng đã bấm load lần khác, bỏ qua kết quả cũ
       setSlots((prev) => {
         const latest = prev[idx];
-        if (latest.token !== currentToken) {
+        if (latest.token !== currentToken!) {
           // token mismatch -> bỏ
           // vẫn dispose VRM vừa load (tránh leak)
+          console.warn('[useMultiVRM] Token mismatch, discarding loaded VRM:', {
+            expected: currentToken,
+            actual: latest.token
+          });
           disposeVRM(loadedVRM);
           return prev;
         }
@@ -126,16 +136,18 @@ export function useMultiVRM() {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load VRM';
+      console.error('[useMultiVRM] Load error:', { idx, error: err });
+      
       setSlots((prev) => {
         const latest = prev[idx];
         // chỉ cập nhật nếu token khớp
-        if (latest.token !== currentToken) return prev;
+        if (latest.token !== currentToken!) return prev;
         const next = [...prev];
         next[idx] = { ...latest, isLoading: false, error: msg };
         return next;
       });
     }
-  }, [disposeVRM, slots]);
+  }, [disposeVRM]);
 
   /**
    * Bỏ VRM ở slot idx

@@ -38,84 +38,73 @@ function fitCameraToBox(camera: THREE.PerspectiveCamera, box: THREE.Box3, contro
 
 /**
  * AutoFit component to fit camera after models are loaded
+ * Now uses event-driven approach instead of delay
  */
-function AutoFit({ controlsRef, allReadyInfo }: {
+function AutoFit({ controlsRef, allReadyInfo, expectedModelCount }: {
   controlsRef: React.MutableRefObject<any>;
   allReadyInfo: React.MutableRefObject<{center: THREE.Vector3; size: THREE.Vector3}[]>;
+  expectedModelCount: number;
 }) {
-  const { camera, scene } = useThree();
+  const { camera } = useThree();
+  
   useEffect(() => {
-    console.log('[AUTO-FIT] AutoFit component mounted, checking scene...');
-    
-    // Đợi một chút để models được add vào scene
-    const timer = setTimeout(() => {
-      // Gộp bbox tất cả VRM models
-      const box = new THREE.Box3();
-      let hasModels = false;
-      let meshCount = 0;
+    // Wait for all models to report ready
+    const checkAndFit = () => {
+      const readyModels = allReadyInfo.current.filter(info => info !== undefined);
       
-      scene.traverse((o) => {
-        if ((o as any).isSkinnedMesh || (o as any).isMesh) {
-          // Skip debug red box
-          if ((o as any).material?.color?.r === 1 && 
-              (o as any).material?.color?.g === 0 && 
-              (o as any).material?.color?.b === 0) {
-            return;
-          }
-          
-          meshCount++;
-          const b = new THREE.Box3().setFromObject(o);
-          if (isFinite(b.min.x) && isFinite(b.max.x)) {
-            box.union(b);
-            hasModels = true;
-          }
-        }
+      if (readyModels.length === 0) {
+        console.log('[AUTO-FIT] No models ready yet');
+        return;
+      }
+      
+      console.log('[AUTO-FIT] Fitting camera based on', readyModels.length, 'models');
+      
+      // Combine all bounding boxes
+      const combinedBox = new THREE.Box3();
+      readyModels.forEach(info => {
+        const modelBox = new THREE.Box3();
+        modelBox.setFromCenterAndSize(info.center, info.size);
+        combinedBox.union(modelBox);
       });
       
-      console.log('[AUTO-FIT] Found meshes:', meshCount, 'Valid bbox:', hasModels);
+      const size = combinedBox.getSize(new THREE.Vector3());
+      const center = combinedBox.getCenter(new THREE.Vector3());
       
-      if (hasModels) {
-        const size = box.getSize(new THREE.Vector3());
-        const center = box.getCenter(new THREE.Vector3());
-        
-        console.log('[AUTO-FIT] Combined bbox:', {
-          size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
-          center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
-        });
-        
-        // For multi-character setup, position camera to see all models
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const fov = (camera as THREE.PerspectiveCamera).fov * (Math.PI / 180);
-        let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-        
-        // Add some padding and adjust for better framing
-        cameraZ *= 1.5; // More distance for better view
-        
-        (camera as THREE.PerspectiveCamera).position.set(0, center.y, cameraZ);
-        
-        if (controlsRef.current) {
-          controlsRef.current.target.copy(center);
-          controlsRef.current.update();
-        }
-        
-        console.log('[AUTO-FIT] Camera positioned at:', {
-          x: camera.position.x.toFixed(2),
-          y: camera.position.y.toFixed(2),
-          z: camera.position.z.toFixed(2)
-        });
-      } else {
-        // Fallback: set default camera position
-        (camera as THREE.PerspectiveCamera).position.set(0, 1.0, 2.5);
-        if (controlsRef.current) {
-          controlsRef.current.target.set(0, 0.9, 0);
-          controlsRef.current.update();
-        }
-        console.log('[AUTO-FIT] No models found, using default camera position');
+      console.log('[AUTO-FIT] Combined bbox:', {
+        size: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
+        center: { x: center.x.toFixed(2), y: center.y.toFixed(2), z: center.z.toFixed(2) }
+      });
+      
+      // Calculate camera distance to fit all models
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const fov = (camera as THREE.PerspectiveCamera).fov * (Math.PI / 180);
+      let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+      
+      // Add padding for better framing (more for multiple models)
+      cameraZ *= expectedModelCount >= 3 ? 1.8 : 1.5;
+      
+      (camera as THREE.PerspectiveCamera).position.set(0, center.y, cameraZ);
+      
+      if (controlsRef.current) {
+        controlsRef.current.target.copy(center);
+        controlsRef.current.update();
       }
-    }, 300); // Tăng delay lên 300ms để đảm bảo models đã được add
-
-    return () => clearTimeout(timer);
-  }, [camera, scene, controlsRef]);
+      
+      console.log('[AUTO-FIT] Camera fitted at:', {
+        position: camera.position,
+        target: controlsRef.current?.target
+      });
+    };
+    
+    // Check immediately
+    checkAndFit();
+    
+    // Also check after a short delay as backup (for any async operations)
+    const backupTimer = setTimeout(checkAndFit, 200);
+    
+    return () => clearTimeout(backupTimer);
+  }, [camera, controlsRef, allReadyInfo, expectedModelCount]);
+  
   return null;
 }
 
@@ -250,8 +239,12 @@ export function MultiVRMScene({
           target={[0, 1.0, 0]}
           maxPolarAngle={Math.PI / 2}
         />
-        {/* Auto-fit sau 1 tick để chắc chắn allReadyInfo đã có */}
-        <AutoFit controlsRef={controlsRef} allReadyInfo={allReadyInfo} />
+        {/* Auto-fit event-driven based on model ready callbacks */}
+        <AutoFit 
+          controlsRef={controlsRef} 
+          allReadyInfo={allReadyInfo}
+          expectedModelCount={vrms.filter(Boolean).length}
+        />
       </Canvas>
 
       {/* Debug overlay showing model status */}
@@ -295,10 +288,19 @@ function VRMModel({
 }: VRMModelProps) {
   const groupRef = useRef<THREE.Group>(null);
   const clockRef = useRef(new THREE.Clock());
-  const hasSetup = useRef(false);
+  const setupIdRef = useRef<string>('');
 
   useEffect(() => {
-    if (!vrm || !groupRef.current || hasSetup.current) return;
+    if (!vrm || !groupRef.current) return;
+
+    // Create unique ID for this setup (vrm + position)
+    const currentSetupId = `${vrm.scene.uuid}-${position.join(',')}`;
+    
+    // Skip if already setup with same vrm and position
+    if (setupIdRef.current === currentSetupId) {
+      console.log('[VRMModel] Already setup with same config, skipping');
+      return;
+    }
 
     console.log('[VRMModel] Setting up VRM scene at world position:', position);
 
@@ -384,16 +386,27 @@ function VRMModel({
     });
 
     vrm.scene.visible = true;
-    hasSetup.current = true;
+    setupIdRef.current = currentSetupId;
     clockRef.current.start();
 
+    // Calculate bbox and notify parent for camera fitting
+    const finalBbox = new THREE.Box3().setFromObject(groupRef.current);
+    const finalSize = finalBbox.getSize(new THREE.Vector3());
+    const finalCenter = finalBbox.getCenter(new THREE.Vector3());
+    
+    if (onReady) {
+      // Notify immediately when setup is done
+      onReady({ center: finalCenter, size: finalSize });
+      console.log('[VRMModel] Ready callback fired:', { center: finalCenter, size: finalSize });
+    }
+
     return () => {
-      hasSetup.current = false;
+      setupIdRef.current = '';
       if (groupRef.current && vrm) {
         groupRef.current.remove(vrm.scene);
       }
     };
-  }, [vrm, position]);
+  }, [vrm, position, onReady]);
 
   // Update VRM animation
   useFrame(() => {
