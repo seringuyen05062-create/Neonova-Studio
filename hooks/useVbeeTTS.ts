@@ -10,12 +10,12 @@ export function useVbeeTTS() {
   /**
    * Generate anime voice from text using Vbee TTS API
    * @param text - Text to convert to speech
-   * @param speed - Speech speed (0.8 - 1.5), default 0.95 for natural anime voice
+   * @param speed - Speech speed (0.8 - 1.5), default 1.1 for lively anime voice
    * @param voice - Voice model to use
    */
   async function speakAnime(
     text: string,
-    speed: number = 0.95,
+    speed: number = 1.1,
     voice: string = 's_hochiminh_female_vyquangcao_advertise_vc'
   ): Promise<string | null> {
     setLoading(true);

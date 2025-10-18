@@ -9,7 +9,7 @@ export class GroundSnapper {
   private ray = new THREE.Raycaster();
   private tmp = new THREE.Vector3();
   private smoothing = 0.25;           // độ mượt: 0..1 (càng cao càng mượt nhưng chậm phản ứng)
-  private hoverTolerance = 0.02;      // cho phép lơ lửng nhẹ 2cm để tự nhiên hơn
+  private hoverTolerance = 0.005;     // giảm từ 0.02 xuống 0.005 (0.5cm) để chân gần sàn hơn
   private maxStep = 0.1;              // giới hạn dịch chuyển tối đa mỗi frame (tránh giật)
 
   constructor(

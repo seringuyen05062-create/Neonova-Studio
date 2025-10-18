@@ -67,12 +67,6 @@ export class LipSyncController {
   private startTime: number = 0;
   private onLipSyncStart?: () => void;
   private onLipSyncEnd?: () => void;
-  
-  // THÊM: Smooth transition cho viseme để giảm khựng
-  private lastViseme: string = 'sil';
-  private currentWeight: number = 0;
-  private targetWeight: number = 0;
-  private transitionSpeed: number = 8.0; // Tốc độ transition
 
   constructor(vrm: VRM, options?: { onLipSyncStart?: () => void; onLipSyncEnd?: () => void }) {
     this.vrm = vrm;
@@ -106,14 +100,7 @@ export class LipSyncController {
     if (this.onLipSyncStart) {
       console.log('👄 [LipSync] Pausing auto facial expressions');
       this.onLipSyncStart();
-      
-      // THÊM: Đợi 50ms để đảm bảo auto expressions được reset hoàn toàn
-      await new Promise(resolve => setTimeout(resolve, 50));
-      console.log('👄 [LipSync] Auto expressions paused, ready for lip sync');
     }
-
-    // Reset mouth to neutral trước khi bắt đầu
-    this.resetMouth();
 
     this.isPlaying = true;
     this.startTime = performance.now();
@@ -165,44 +152,16 @@ export class LipSyncController {
   }
 
   /**
-   * Apply viseme to VRM model with smooth transition
+   * Apply viseme to VRM model
    */
   private applyViseme(viseme: string) {
     console.log('👄 [LipSync] applyViseme called with:', viseme);
     
-    // THÊM: Smooth transition logic
-    if (viseme !== this.lastViseme) {
-      this.lastViseme = viseme;
-      
-      if (viseme === 'sil') {
-        this.targetWeight = 0;
-      } else {
-        this.targetWeight = this.clampWeight(this.calculateVisemeWeight(viseme));
-      }
-    }
+    // Reset previous mouth shapes first
+    this.resetMouth();
     
-    // Interpolate weight smoothly
-    const deltaTime = 1/60; // Assume 60fps
-    this.currentWeight = this.lerp(this.currentWeight, this.targetWeight, this.transitionSpeed * deltaTime);
-    
-    // Apply with smoothed weight
-    this.applyVisemeWithWeight(viseme, this.currentWeight);
-  }
-  
-  /**
-   * Linear interpolation helper
-   */
-  private lerp(start: number, end: number, factor: number): number {
-    return start + (end - start) * Math.min(factor, 1.0);
-  }
-  
-  /**
-   * Apply viseme with specific weight
-   */
-  private applyVisemeWithWeight(viseme: string, weight: number) {
-    // Reset previous mouth shapes first (chỉ khi cần thiết)
-    if (weight === 0) {
-      this.resetMouth();
+    // Skip silence
+    if (viseme === 'sil') {
       return;
     }
     
@@ -211,12 +170,16 @@ export class LipSyncController {
     let appliedViaExpression = false;
     
     if (expressionManager) {
-      appliedViaExpression = this.applyExpressionManagerWithWeight(viseme, expressionManager, weight);
+      appliedViaExpression = this.applyExpressionManager(viseme, expressionManager);
     }
     
     // If expression manager failed, try direct morph targets
     if (!appliedViaExpression && this.vrm.scene) {
-      this.applyMorphTargetWithWeight(viseme, weight);
+      this.applyMorphTarget(viseme);
+    }
+    
+    if (!appliedViaExpression) {
+      console.warn('👄 [LipSync] No expressionManager available for viseme:', viseme);
     }
   }
 
@@ -225,7 +188,7 @@ export class LipSyncController {
    */
   private applyMorphTarget(viseme: string) {
     try {
-      const weight = this.clampWeight(this.calculateVisemeWeight(viseme)); // Apply clamping
+      const weight = this.calculateVisemeWeight(viseme);
       console.log('👄 [LipSync] Trying morph targets with weight:', weight);
       
       // Find mesh with morph targets
@@ -259,7 +222,7 @@ export class LipSyncController {
    */
   private applyExpressionManager(viseme: string, expressionManager: any): boolean {
     try {
-      const weight = this.clampWeight(this.calculateVisemeWeight(viseme)); // Apply clamping
+      const weight = this.calculateVisemeWeight(viseme);
       const blendShapeName = VISEME_TO_BLENDSHAPE[viseme] || 'neutral';
       
       console.log('👄 [LipSync] Expression manager - viseme:', viseme, 'blendShape:', blendShapeName, 'weight:', weight);
@@ -283,22 +246,22 @@ export class LipSyncController {
         }
       }
       
-      // Fallback to standard VRM expressions with conservative approach
+      // Fallback to standard VRM expressions
       if (!applied) {
         if (blendShapeName === 'aa' || blendShapeName === 'oh' || blendShapeName === 'ou') {
-          // Wide mouth shapes - prefer happy over surprised to avoid over-opening
-          if (availableExpressions['happy']) {
-            expressionManager.setValue('happy', this.clampWeight(weight * 0.25)); // Use happy primarily
+          // Wide mouth shapes - use happy or surprised
+          if (availableExpressions['surprised']) {
+            expressionManager.setValue('surprised', weight * 0.5);
             applied = true;
-          } else if (availableExpressions['surprised']) {
-            expressionManager.setValue('surprised', this.clampWeight(weight * 0.2)); // Further reduced surprised
+          } else if (availableExpressions['happy']) {
+            expressionManager.setValue('happy', weight * 0.3);
             applied = true;
           }
-          console.log('👄 [LipSync] Applied wide mouth fallback (conservative)');
+          console.log('👄 [LipSync] Applied wide mouth fallback');
         } else if (blendShapeName === 'ih' || blendShapeName === 'E') {
           // Small mouth shapes - use subtle happy
           if (availableExpressions['happy']) {
-            expressionManager.setValue('happy', this.clampWeight(weight * 0.15)); // Reduced from 0.2
+            expressionManager.setValue('happy', weight * 0.2);
             applied = true;
           }
           console.log('👄 [LipSync] Applied small mouth fallback');
@@ -313,122 +276,23 @@ export class LipSyncController {
   }
 
   /**
-   * Apply lip sync via expression manager with custom weight (for smooth transition)
-   */
-  private applyExpressionManagerWithWeight(viseme: string, expressionManager: any, weight: number): boolean {
-    try {
-      const blendShapeName = VISEME_TO_BLENDSHAPE[viseme] || 'neutral';
-      
-      // Try to use mouth-specific expressions if available
-      const availableExpressions = expressionManager.presetExpressionMap || expressionManager.expressions || {};
-      
-      let applied = false;
-      
-      // Try mouth-specific expressions first
-      const mouthExpressions = ['aa', 'ih', 'ou', 'ee', 'oh', 'mouth_a', 'mouth_i', 'mouth_u', 'mouth_e', 'mouth_o'];
-      for (const expr of mouthExpressions) {
-        if (availableExpressions[expr] !== undefined) {
-          if (expr === blendShapeName || expr.includes(blendShapeName)) {
-            expressionManager.setValue(expr, weight);
-            applied = true;
-            break;
-          }
-        }
-      }
-      
-      // Fallback to standard VRM expressions with conservative approach
-      if (!applied) {
-        if (blendShapeName === 'aa' || blendShapeName === 'oh' || blendShapeName === 'ou') {
-          // Wide mouth shapes - prefer happy over surprised to avoid over-opening
-          if (availableExpressions['happy']) {
-            expressionManager.setValue('happy', this.clampWeight(weight * 0.25));
-            applied = true;
-          } else if (availableExpressions['surprised']) {
-            expressionManager.setValue('surprised', this.clampWeight(weight * 0.2));
-            applied = true;
-          }
-        } else if (blendShapeName === 'ih' || blendShapeName === 'E') {
-          // Small mouth shapes - use subtle happy
-          if (availableExpressions['happy']) {
-            expressionManager.setValue('happy', this.clampWeight(weight * 0.15));
-            applied = true;
-          }
-        }
-      }
-
-      return applied;
-    } catch (error) {
-      console.warn('👄 [LipSync] Expression manager failed:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Apply lip sync via direct morph target manipulation with custom weight
-   */
-  private applyMorphTargetWithWeight(viseme: string, weight: number) {
-    try {
-      // Find mesh with morph targets
-      this.vrm.scene.traverse((child: any) => {
-        if (child.isMesh && child.morphTargetInfluences) {
-          const morphTargets = child.morphTargetDictionary;
-          
-          if (morphTargets) {
-            // Try common mouth morph target names
-            const mouthTargets = ['mouth', 'Mouth', 'mouth_a', 'mouth_o', 'mouth_i', 'mouth_u', 'mouth_e', 'A', 'O', 'I', 'U', 'E'];
-            
-            for (const targetName of mouthTargets) {
-              if (morphTargets[targetName] !== undefined) {
-                const index = morphTargets[targetName];
-                child.morphTargetInfluences[index] = weight;
-                return;
-              }
-            }
-          }
-        }
-      });
-    } catch (error) {
-      console.warn('👄 [LipSync] Morph target failed:', error);
-    }
-  }
-
-  /**
    * Calculate viseme weight based on phoneme type
    */
   private calculateVisemeWeight(viseme: string): number {
-    // Vowels get moderate weight (reduced from 1.0 to prevent over-opening)
+    // Vowels get full weight
     if (['aa', 'E', 'ih', 'oh', 'ou'].includes(viseme)) {
-      return 0.6; // Reduced from 1.0
+      return 1.0;
     }
-    // Consonants get lower weight
-    return 0.3; // Reduced from 0.6
-  }
-
-  /**
-   * Clamp weight to safe range to prevent over-animation
-   */
-  private clampWeight(weight: number): number {
-    return Math.max(0, Math.min(0.5, weight)); // Max 0.5 to prevent extreme mouth opening
+    // Consonants get reduced weight
+    return 0.6;
   }
 
   /**
    * Reset mouth to neutral position
    */
   private resetMouth() {
-    // THAY ĐỔI: Reset mouth về neutral để tránh frames cũ gây khựng
-    if (this.vrm.expressionManager) {
-      const expressions = this.vrm.expressionManager;
-      // Reset tất cả mouth expressions về 0 để chuẩn bị cho frame tiếp theo
-      const mouthExpressions = ['aa', 'ih', 'ou', 'ee', 'oh', 'pp', 'ff', 'dd', 'nn', 'rr', 'ss', 'ch', 'kk',
-                                'mouth_a', 'mouth_i', 'mouth_u', 'mouth_e', 'mouth_o'];
-      mouthExpressions.forEach(exp => {
-        try {
-          expressions.setValue(exp as any, 0);
-        } catch (e) {
-          // Expression không tồn tại, bỏ qua
-        }
-      });
-    }
+    // Không reset miệng về neutral, giữ nguyên morph target hiện tại
+    // Để đảm bảo pose mẫu và animation body không bị ảnh hưởng
   }
 
   /**
@@ -441,42 +305,14 @@ export class LipSyncController {
       this.animationFrameId = null;
     }
     
-    // THÊM: Smooth fade-out mouth expressions trước khi reset
-    this.smoothFadeToNeutral(() => {
-      // Resume auto facial expressions after lip sync
-      if (this.onLipSyncEnd) {
-        console.log('👄 [LipSync] Resuming auto facial expressions');
-        this.onLipSyncEnd();
-      }
-    });
-  }
-  
-  /**
-   * Smooth fade to neutral mouth position
-   */
-  private smoothFadeToNeutral(callback?: () => void) {
-    const fadeSteps = 5;
-    let currentStep = 0;
+    // Resume auto facial expressions after lip sync
+    if (this.onLipSyncEnd) {
+      console.log('👄 [LipSync] Resuming auto facial expressions');
+      this.onLipSyncEnd();
+    }
     
-    const fadeInterval = setInterval(() => {
-      currentStep++;
-      const progress = currentStep / fadeSteps;
-      
-      // Giảm dần current weight về 0
-      this.currentWeight = this.currentWeight * (1 - progress);
-      this.applyVisemeWithWeight(this.lastViseme, this.currentWeight);
-      
-      if (currentStep >= fadeSteps) {
-        clearInterval(fadeInterval);
-        this.resetMouth(); // Final reset
-        this.currentWeight = 0;
-        this.lastViseme = 'sil';
-        
-        if (callback) {
-          callback();
-        }
-      }
-    }, 16); // ~60fps
+    // Reset mouth to neutral after lip sync
+    this.resetMouth();
   }
 
   /**

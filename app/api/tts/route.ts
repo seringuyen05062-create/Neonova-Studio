@@ -6,7 +6,7 @@ const VBEE_API_URL = 'https://vbee.vn/api/v1/tts';
 
 export async function POST(request: NextRequest) {
   try {
-    const { text, voice = 's_hochiminh_female_vyquangcao_advertise_vc', rate = 0.95, pitch = 1.0 } = await request.json();
+    const { text, voice = 's_hochiminh_female_vyquangcao_advertise_vc', rate = 1.1, pitch = 1.0 } = await request.json();
 
     if (!text) {
       return NextResponse.json(

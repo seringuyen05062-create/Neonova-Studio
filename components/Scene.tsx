@@ -49,172 +49,143 @@ function VRMModel({ vrm, onUpdate }: { vrm: VRM; onUpdate?: () => void }) {
     }
 
     return () => {
-      if (snapperRef.current) {
-        // GroundSnapper cleanup
-        snapperRef.current = null;
-      }
-      clockRef.current.stop();
+      snapperRef.current = null;
     };
   }, [vrm]);
 
-  useFrame((state, delta) => {
-    if (vrm && snapperRef.current) {
-      // Update VRM animation
+  // Update VRM và GroundSnapper trên mỗi frame
+  useFrame(() => {
+    // Kiểm tra VRM có tồn tại và chưa bị dispose
+    if (!vrm || !vrm.scene || !snapperRef.current) {
+      return;
+    }
+    
+    try {
+      const delta = clockRef.current.getDelta();
+      
+      // Update VRM (bao gồm animation mixer nếu có)
       vrm.update(delta);
       
-      // Update ground snapper để model luôn chạm đất
+      // Update GroundSnapper SAU khi update animation
       snapperRef.current.update(delta);
       
-      // Update parent component if needed
+      // Callback cho parent component
       onUpdate?.();
+    } catch (error) {
+      console.error('[VRMModel] Error in useFrame update:', error);
     }
   });
 
-  if (!vrm) return null;
-
-  return (
-    <group ref={groupRef} />
-  );
+  return <group ref={groupRef} />;
 }
 
-function CameraController() {
-  const { camera, gl } = useThree();
-  const controlsRef = useRef<any>();
-
-  useEffect(() => {
-    // Configure camera cho VRM scene
-    camera.position.set(0, 1.5, 2.5);
-    camera.lookAt(0, 1.2, 0);
-    if ('fov' in camera) {
-      camera.fov = 50;
-      camera.updateProjectionMatrix();
-    }
-  }, [camera]);
-
+// Sàn với shadow receiver đơn giản - chỉ 1 bóng
+function GroundPlane({ backgroundColor }: { backgroundColor?: string }) {
   return (
-    <OrbitControls
-      ref={controlsRef}
-      args={[camera, gl.domElement]}
-      target={[0, 1.2, 0]}
-      enablePan={true}
-      enableZoom={true}
-      enableRotate={true}
-      minDistance={1}
-      maxDistance={10}
-      minPolarAngle={0}
-      maxPolarAngle={Math.PI}
-    />
-  );
-}
-
-function Lighting() {
-  return (
-    <>
-      {/* Main directional light */}
-      <directionalLight
-        position={[5, 10, 5]}
-        intensity={1.2}
-        castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
-        shadow-camera-far={50}
-        shadow-camera-left={-10}
-        shadow-camera-right={10}
-        shadow-camera-top={10}
-        shadow-camera-bottom={-10}
+    <mesh 
+      receiveShadow 
+      rotation={[-Math.PI / 2, 0, 0]} 
+      position={[0, -0.001, 0]}
+    >
+      <planeGeometry args={[100, 100]} />
+      <shadowMaterial 
+        opacity={0.25} 
+        transparent 
+        color={backgroundColor === '#ffffff' ? '#000000' : '#333333'}
       />
-      
-      {/* Fill light */}
-      <directionalLight
-        position={[-3, 5, -3]}
-        intensity={0.4}
-      />
-      
-      {/* Ambient light */}
-      <ambientLight intensity={0.3} />
-      
-      {/* Point light for character highlight */}
-      <pointLight
-        position={[0, 3, 2]}
-        intensity={0.5}
-        distance={10}
-        decay={2}
-      />
-    </>
-  );
-}
-
-function Ground() {
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-      <planeGeometry args={[50, 50]} />
-      <meshStandardMaterial color="#f0f0f0" />
     </mesh>
   );
 }
 
-// Scene component with confetti support
-const Scene = forwardRef<SceneRef, SceneProps>(
-  ({ vrm, onUpdate, aspectRatio, backgroundColor }, ref) => {
-    const [confetti, setConfetti] = useState<CanvasConfetti | null>(null);
-    const canvasRef = useRef<HTMLCanvasElement>(null);
+const Scene = forwardRef<SceneRef, SceneProps>(({ vrm, onUpdate, aspectRatio, backgroundColor }, ref) => {
+  const confettiRef = useRef<CanvasConfetti>(new CanvasConfetti());
 
-    // Expose confetti method to parent
-    useImperativeHandle(ref, () => ({
-      triggerConfetti: () => {
-        if (confetti) {
-          confetti.fireBothSides();
+  // Cleanup khi component unmount
+  useEffect(() => {
+    return () => {
+      confettiRef.current.dispose();
+    };
+  }, []);
+
+  // Expose methods to parent
+  useImperativeHandle(ref, () => ({
+    triggerConfetti: () => {
+      console.log('[Scene] triggerConfetti called!');
+      console.log('[Scene] confettiRef.current:', confettiRef.current);
+      // Gọi async method
+      confettiRef.current.fireBothSides().catch(err => {
+        console.error('[Scene] Error firing confetti:', err);
+      });
+    },
+  }));
+
+  return (
+    <div className="w-full h-full canvas-container">
+      <Canvas
+        camera={
+          aspectRatio === '9:16'
+            ? { position: [0, 1.4, 2.5], fov: 25 }
+            : { position: [0, 1.2, 2], fov: 35 }
         }
-      }
-    }));
-
-    // Initialize confetti system
-    const initConfetti = useCallback(() => {
-      if (canvasRef.current && !confetti) {
-        const newConfetti = new CanvasConfetti();
-        setConfetti(newConfetti);
-      }
-    }, [confetti]);
-
-    return (
-      <div className="relative w-full h-full">
-        {/* Three.js Canvas */}
-        <Canvas
-          shadows
-          className="w-full h-full"
-          camera={{ position: [0, 1.5, 2.5], fov: 50 }}
-          style={{ background: backgroundColor || '#f5f5f5' }}
-        >
-          {/* Lighting setup */}
-          <Lighting />
-          
-          {/* Background */}
-          <StudioBackground />
-          
-          {/* Ground plane */}
-          <Ground />
-          
-          {/* VRM Model */}
-          {vrm && <VRMModel vrm={vrm} onUpdate={onUpdate} />}
-          
-          {/* Camera controls */}
-          <CameraController />
-        </Canvas>
-
-        {/* Confetti Canvas Overlay */}
-        <canvas
-          ref={canvasRef}
-          className="absolute inset-0 pointer-events-none z-10"
-          style={{
-            width: '100%',
-            height: '100%',
-          }}
-          onLoad={initConfetti}
+        gl={{ 
+          antialias: true, 
+          alpha: false,  // Disable alpha để có background solid
+        }}
+        shadows // Enable shadows globally
+      >
+        {/* Lighting với shadow */}
+        <ambientLight intensity={0.6} />
+        
+        {/* Directional light chính với shadow map được mở rộng để bao phủ mọi góc camera */}
+        <directionalLight
+          position={[8, 15, 8]}
+          intensity={1.5}
+          castShadow
+          shadow-mapSize-width={4096}
+          shadow-mapSize-height={4096}
+          shadow-camera-far={100}
+          shadow-camera-left={-25}
+          shadow-camera-right={25}
+          shadow-camera-top={25}
+          shadow-camera-bottom={-25}
+          shadow-camera-near={0.1}
+          shadow-bias={-0.0001}
         />
-      </div>
-    );
-  }
-);
+        
+        {/* Directional light phụ - KHÔNG có shadow để tránh bóng đôi */}
+        <directionalLight
+          position={[-8, 12, -8]}
+          intensity={0.8}
+          castShadow={false}
+        />
+        
+        {/* Thêm ánh sáng phụ để model sáng đều */}
+        <pointLight position={[-5, 5, -5]} intensity={0.4} />
+        <pointLight position={[5, 3, -3]} intensity={0.3} />
+        
+        {/* Studio Background - contained within canvas */}
+        <StudioBackground color={backgroundColor} />
+        
+        {/* Sàn nhận bóng - tương thích với màu nền */}
+        <GroundPlane backgroundColor={backgroundColor} />
+        
+        {/* VRM Model - cast shadow */}
+        {vrm && <VRMModel vrm={vrm} onUpdate={onUpdate} />}
+        
+        {/* Camera Controls với phạm vi mở rộng */}
+        <OrbitControls
+          target={aspectRatio === '9:16' ? [0, 1.4, 0] : [0, 1.2, 0]}
+          enablePan={false}
+          enableZoom={true}
+          minDistance={1}
+          maxDistance={8}
+          minPolarAngle={Math.PI / 6}  // 30 độ (cao hơn một chút)
+          maxPolarAngle={Math.PI / 2.2}  // ~82 độ (gần ngang nhưng không hoàn toàn)
+        />
+      </Canvas>
+    </div>
+  );
+});
 
 Scene.displayName = 'Scene';
 

@@ -43,7 +43,7 @@ export class AnimationController {
   private currentBlinkInterval: number = 4.0;
   
   // Lip sync control
-  private isAutoMouthExpressionsPaused: boolean = false;
+  private isAutoFacialExpressionsPaused: boolean = false;
 
   constructor(vrm: VRM, animations?: Map<string, { clips: THREE.AnimationClip[], format: string }>) {
     this.vrm = vrm;
@@ -295,6 +295,11 @@ export class AnimationController {
    */
   private updateVRMFacialExpressions(delta: number) {
     if (!this.vrm.expressionManager) return;
+    
+    // Skip auto facial expressions if paused for lip sync
+    if (this.isAutoFacialExpressionsPaused) {
+      return;
+    }
 
     const time = this.facialClock.getElapsedTime();
     
@@ -302,8 +307,7 @@ export class AnimationController {
     const blinkValue = this.calculateNaturalBlink(time);
     
     // === DYNAMIC MOUTH EXPRESSIONS ===
-    // Only skip mouth expressions if paused for lip sync
-    const mouthExpressions = this.isAutoMouthExpressionsPaused ? {} : this.calculateMouthExpressions(time);
+    const mouthExpressions = this.calculateMouthExpressions(time);
     
     // === EYE EXPRESSIONS (Gaze, Wink, etc.) ===
     const eyeExpressions = this.calculateEyeExpressions(time);
@@ -1794,38 +1798,31 @@ export class AnimationController {
   }
 
   /**
-   * Pause auto mouth expressions (for lip sync)
+   * Pause auto facial expressions (for lip sync)
    */
-  pauseAutoMouthExpressions() {
-    this.isAutoMouthExpressionsPaused = true;
-    console.log('👄 [AnimationController] Auto mouth expressions paused for lip sync');
+  pauseAutoFacialExpressions() {
+    this.isAutoFacialExpressionsPaused = true;
+    console.log('👄 [AnimationController] Auto facial expressions paused for lip sync');
     
-    // MẠNH MẼLER: Reset ALL mouth expressions về 0 ngay lập tức
+    // Reset mouth to neutral to avoid conflict with lip sync
     if (this.vrm.expressionManager) {
       const expressions = this.vrm.expressionManager;
-      // Reset tất cả mouth expressions có thể
-      const allMouthExpressions = ['aa', 'ih', 'ou', 'ee', 'oh', 'pp', 'ff', 'dd', 'nn', 'rr', 'ss', 'ch', 'kk', 
-                                    'mouth_a', 'mouth_i', 'mouth_u', 'mouth_e', 'mouth_o', 'happy', 'surprised', 'sad'];
-      allMouthExpressions.forEach(exp => {
-        try {
+      // Reset all mouth-related expressions
+      const mouthExpressions = ['aa', 'ih', 'ou', 'ee', 'oh', 'pp', 'ff', 'dd', 'nn', 'rr', 'ss', 'ch', 'kk'];
+      mouthExpressions.forEach(exp => {
+        if (expressions.expressionMap[exp]) {
           expressions.setValue(exp as any, 0);
-        } catch (e) {
-          // Expression không tồn tại, bỏ qua
         }
       });
-      
-      // Đảm bảo expressions được áp dụng ngay
-      expressions.update();
-      console.log('👄 [AnimationController] Forcefully reset all mouth expressions to 0');
     }
   }
 
   /**
-   * Resume auto mouth expressions (after lip sync)
+   * Resume auto facial expressions (after lip sync)
    */
-  resumeAutoMouthExpressions() {
-    this.isAutoMouthExpressionsPaused = false;
-    console.log('👄 [AnimationController] Auto mouth expressions resumed after lip sync');
+  resumeAutoFacialExpressions() {
+    this.isAutoFacialExpressionsPaused = false;
+    console.log('👄 [AnimationController] Auto facial expressions resumed after lip sync');
   }
 
   /**

@@ -99,15 +99,15 @@ export function useAnimation(
     }
   }, []);
 
-  const pauseAutoMouthExpressions = useCallback(() => {
+  const pauseAutoFacialExpressions = useCallback(() => {
     if (controllerRef.current) {
-      controllerRef.current.pauseAutoMouthExpressions();
+      controllerRef.current.pauseAutoFacialExpressions();
     }
   }, []);
 
-  const resumeAutoMouthExpressions = useCallback(() => {
+  const resumeAutoFacialExpressions = useCallback(() => {
     if (controllerRef.current) {
-      controllerRef.current.resumeAutoMouthExpressions();
+      controllerRef.current.resumeAutoFacialExpressions();
     }
   }, []);
 
@@ -117,7 +117,7 @@ export function useAnimation(
     playAnimation,
     stopAnimation,
     update,
-    pauseAutoMouthExpressions,
-    resumeAutoMouthExpressions,
+    pauseAutoFacialExpressions,
+    resumeAutoFacialExpressions,
   };
 }
