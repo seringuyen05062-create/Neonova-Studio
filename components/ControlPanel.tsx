@@ -212,6 +212,30 @@ export default function ControlPanel({
             )}
           </div>
 
+          {/* Multi-VRM Feature Link */}
+          <div className="border-t border-gray-700 pt-4">
+            <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h4 className="text-sm font-medium text-white mb-1">🎭 Multi-VRM System</h4>
+                  <p className="text-xs text-white/70">Tải nhiều nhân vật cùng lúc (tối đa 3)</p>
+                </div>
+                <div className="text-2xl">👥</div>
+              </div>
+              <a 
+                href="/multi-vrm" 
+                target="_blank"
+                className="w-full inline-flex items-center justify-center px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg transition-all duration-200 text-sm font-medium"
+              >
+                <span className="mr-2">🚀</span>
+                Mở Multi-VRM Demo
+              </a>
+              <p className="text-xs text-white/50 mt-2 text-center">
+                Trang mới với hỗ trợ tối đa 3 nhân vật VRM
+              </p>
+            </div>
+          </div>
+
           {/* Animation Upload Section */}
           {onUploadAnimation && (
             <div>
